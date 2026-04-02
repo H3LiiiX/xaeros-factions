@@ -1,0 +1,33 @@
+{
+	"schemaVersion": 1,
+	"id": "xaero-factions",
+	"version": "${version}",
+	"name": "Xaero Factions",
+	"description": "Displays Factions claims on Xaero's Maps.",
+	"authors": [
+		"H3LiiiX"
+	],
+	"contact": {},
+	"license": "GNU General Public License v3",
+	"icon": "assets/xaero-factions/icon.png",
+	"environment": "*",
+	"entrypoints": {
+        "main": ["h3liiix.xaerofactions.XaeroFactionsMod"],
+        "client": ["h3liiix.xaerofactions.XaeroFactionsClient"],
+        "server": ["h3liiix.xaerofactions.server.XaeroFactionsServer"]
+    },
+	"mixins": [
+		"xaero-factions.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.18.4",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"xaerominimap": "*",
+		"xaeroworldmap": "*",
+		"factions": "*"
+  	}
+}
