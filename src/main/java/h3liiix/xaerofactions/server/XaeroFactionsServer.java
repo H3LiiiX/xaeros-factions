@@ -280,14 +280,6 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
         ServerPlayNetworking.send(player, new SyncClaimsPayload(allClaims, true));
     }
 
-    private void broadcastToAll(SyncClaimsPayload payload) {
-        if (currentServer != null) {
-            for (ServerPlayerEntity player : currentServer.getPlayerManager().getPlayerList()) {
-                ServerPlayNetworking.send(player, payload);
-            }
-        }
-    }
-
     private SyncClaimsPayload.ClaimInfo toClaimInfo(Claim claim) {
         Faction faction = claim.getFaction();
         int color = 0xFFFFFF; 
