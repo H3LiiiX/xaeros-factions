@@ -1,4 +1,5 @@
 package h3liiix.xaerofactions.server;
+
 import h3liiix.xaerofactions.network.ClaimActionPayload;
 import h3liiix.xaerofactions.network.SyncClaimsPayload;
 import h3liiix.xaerofactions.config.XaeroFactionsConfig;
@@ -29,6 +30,8 @@ import java.util.LinkedList;
 
 public class XaeroFactionsServer implements DedicatedServerModInitializer {
     private static MinecraftServer currentServer;
+    
+    private static boolean isBulkClaiming = false;
 
     @Override
     public void onInitializeServer() {
@@ -44,7 +47,7 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
         RelationshipEvents.NEW_DECLARATION.register((relationship) -> resyncAllPlayers());
 
         ClaimEvents.ADD.register(claim -> {
-            if (currentServer == null) return;
+            if (currentServer == null || isBulkClaiming) return;
             Faction targetFaction = claim.getFaction();
             
             for (ServerPlayerEntity player : currentServer.getPlayerManager().getPlayerList()) {
@@ -58,13 +61,12 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
         });
 
         ClaimEvents.REMOVE.register((x, z, level, faction) -> {
+            if (currentServer == null || isBulkClaiming) return;
             SyncClaimsPayload.ClaimInfo removedInfo = new SyncClaimsPayload.ClaimInfo(x, z, level, "", -1);
             SyncClaimsPayload payload = new SyncClaimsPayload(List.of(removedInfo), false);
             
-            if (currentServer != null) {
-                for (ServerPlayerEntity player : currentServer.getPlayerManager().getPlayerList()) {
-                    ServerPlayNetworking.send(player, payload);
-                }
+            for (ServerPlayerEntity player : currentServer.getPlayerManager().getPlayerList()) {
+                ServerPlayNetworking.send(player, payload);
             }
         });
 
@@ -224,10 +226,31 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
                         return;
                     }
 
-                    for (int x = minX; x <= maxX; x++) {
-                        for (int z = minZ; z <= maxZ; z++) {
-                            if (Claim.get(x, z, payload.dimension()) == null) {
-                                faction.addClaim(x, z, payload.dimension());
+                    List<SyncClaimsPayload.ClaimInfo> successfulClaims = new ArrayList<>();
+                    
+                    isBulkClaiming = true;
+                    try {
+                        for (int x = minX; x <= maxX; x++) {
+                            for (int z = minZ; z <= maxZ; z++) {
+                                if (Claim.get(x, z, payload.dimension()) == null) {
+                                    faction.addClaim(x, z, payload.dimension());
+                                    Claim added = Claim.get(x, z, payload.dimension());
+                                    if (added != null) {
+                                        successfulClaims.add(toClaimInfo(added));
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        isBulkClaiming = false;
+                    }
+
+                    if (!successfulClaims.isEmpty()) {
+                        for (ServerPlayerEntity p : currentServer.getPlayerManager().getPlayerList()) {
+                            User u = User.get(p.getUuid());
+                            Faction pFaction = u != null ? u.getFaction() : null;
+                            if (isVisibleTo(pFaction, faction)) {
+                                ServerPlayNetworking.send(p, new SyncClaimsPayload(successfulClaims, false));
                             }
                         }
                     }
@@ -235,17 +258,29 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
 
                 } else {
                     int successCount = 0;
-                    for (int x = minX; x <= maxX; x++) {
-                        for (int z = minZ; z <= maxZ; z++) {
-                            Claim existing = Claim.get(x, z, payload.dimension());
-                            if (existing != null && (user.bypass || existing.getFaction().getID().equals(faction.getID()))) {
-                                existing.remove();
-                                successCount++;
+                    List<SyncClaimsPayload.ClaimInfo> removedClaims = new ArrayList<>();
+                    
+                    isBulkClaiming = true;
+                    try {
+                        for (int x = minX; x <= maxX; x++) {
+                            for (int z = minZ; z <= maxZ; z++) {
+                                Claim existing = Claim.get(x, z, payload.dimension());
+                                if (existing != null && (user.bypass || existing.getFaction().getID().equals(faction.getID()))) {
+                                    existing.remove();
+                                    removedClaims.add(new SyncClaimsPayload.ClaimInfo(x, z, payload.dimension(), "", -1));
+                                    successCount++;
+                                }
                             }
                         }
+                    } finally {
+                        isBulkClaiming = false;
                     }
                     
                     if (successCount > 0) {
+                        SyncClaimsPayload removalPayload = new SyncClaimsPayload(removedClaims, false);
+                        for (ServerPlayerEntity p : currentServer.getPlayerManager().getPlayerList()) {
+                            ServerPlayNetworking.send(p, removalPayload);
+                        }
                         sendMapNotification(player, true, "Successfully unclaimed " + successCount + " chunks!");
                     } else {
                         sendMapNotification(player, false, "No chunks owned by your faction were found in that selection.");
@@ -270,13 +305,24 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
         Faction playerFaction = user != null ? user.getFaction() : null;
 
         List<SyncClaimsPayload.ClaimInfo> allClaims = new ArrayList<>();
-        for (Faction faction : Faction.all()) {
+        
+        java.util.Collection<Faction> factionsList;
+        
+        try {
+            java.lang.reflect.Method hiddenMethod = Faction.class.getMethod("allIncludeHidden");
+            factionsList = (java.util.Collection<Faction>) hiddenMethod.invoke(null);
+        } catch (Exception e) {
+            factionsList = Faction.all();
+        }
+
+        for (Faction faction : factionsList) {
             if (!isVisibleTo(playerFaction, faction)) continue;
 
             for (Claim claim : faction.getClaims()) {
                 allClaims.add(toClaimInfo(claim));
             }
         }
+        
         ServerPlayNetworking.send(player, new SyncClaimsPayload(allClaims, true));
     }
 
@@ -296,7 +342,7 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
 
     private boolean isVisibleTo(Faction viewer, Faction target) {
         if (target == null) return false;
-        if (viewer != null && viewer.getID().equals(target.getID())) return true; // Always see your own claims
+        if (viewer != null && viewer.getID().equals(target.getID())) return true;
 
         Relationship.Status status = Relationship.Status.NEUTRAL;
         if (viewer != null) {
