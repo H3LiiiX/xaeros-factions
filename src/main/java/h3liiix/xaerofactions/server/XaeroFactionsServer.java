@@ -2,6 +2,7 @@ package h3liiix.xaerofactions.server;
 
 import h3liiix.xaerofactions.network.ClaimActionPayload;
 import h3liiix.xaerofactions.network.SyncClaimsPayload;
+import h3liiix.xaerofactions.network.SyncPlayerPosPayload;
 import h3liiix.xaerofactions.config.XaeroFactionsConfig;
 import io.icker.factions.api.events.PlayerEvents;
 import io.icker.factions.api.events.RelationshipEvents;
@@ -14,6 +15,7 @@ import io.icker.factions.api.persistents.Faction;
 import io.icker.factions.api.persistents.User;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
@@ -45,6 +47,57 @@ public class XaeroFactionsServer implements DedicatedServerModInitializer {
         });
 
         RelationshipEvents.NEW_DECLARATION.register((relationship) -> resyncAllPlayers());
+
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (server.getTicks() % 20 != 0) return;
+
+            for (ServerPlayerEntity viewer : server.getPlayerManager().getPlayerList()) {
+                User viewerUser = User.get(viewer.getUuid());
+                Faction viewerFaction = viewerUser != null ? viewerUser.getFaction() : null;
+
+                List<SyncPlayerPosPayload.PlayerPosInfo> trackedPlayers = new ArrayList<>();
+
+                for (ServerPlayerEntity target : server.getPlayerManager().getPlayerList()) {
+                    if (viewer == target) continue;
+
+                    User targetUser = User.get(target.getUuid());
+                    Faction targetFaction = targetUser != null ? targetUser.getFaction() : null;
+
+                    boolean sameFaction = false;
+                    Relationship.Status status = Relationship.Status.NEUTRAL;
+
+                    if (viewerFaction != null && targetFaction != null) {
+                        if (viewerFaction.getID().equals(targetFaction.getID())) {
+                            sameFaction = true;
+                        } else {
+                            Relationship rel = viewerFaction.getRelationship(targetFaction.getID());
+                            if (rel != null) status = rel.status;
+                        }
+                    }
+
+                    boolean shouldTrack = false;
+                    if (sameFaction && XaeroFactionsConfig.INSTANCE.trackSameFaction) shouldTrack = true;
+                    else if (!sameFaction && status == Relationship.Status.ALLY && XaeroFactionsConfig.INSTANCE.trackAlly) shouldTrack = true;
+                    else if (!sameFaction && status == Relationship.Status.ENEMY && XaeroFactionsConfig.INSTANCE.trackEnemy) shouldTrack = true;
+                    else if (!sameFaction && status == Relationship.Status.NEUTRAL && XaeroFactionsConfig.INSTANCE.trackNeutral) shouldTrack = true;
+
+                    if (shouldTrack) {
+                        int color = (targetFaction != null && targetFaction.getColor() != null && targetFaction.getColor().getColorValue() != null)
+                                ? targetFaction.getColor().getColorValue() : 0xFFFFFF;
+
+                        trackedPlayers.add(new SyncPlayerPosPayload.PlayerPosInfo(
+                                target.getUuid(),
+                                target.getName().getString(),
+                                target.getX(), target.getY(), target.getZ(),
+                                target.getEntityWorld().getRegistryKey().getValue().toString(),
+                                color
+                        ));
+                    }
+                }
+                
+                ServerPlayNetworking.send(viewer, new SyncPlayerPosPayload(trackedPlayers));
+            }
+        });
 
         ClaimEvents.ADD.register(claim -> {
             if (currentServer == null || isBulkClaiming) return;

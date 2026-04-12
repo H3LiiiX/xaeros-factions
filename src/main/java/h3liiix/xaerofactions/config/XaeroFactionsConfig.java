@@ -18,6 +18,11 @@ public class XaeroFactionsConfig {
     public boolean hideEnemyClaims = false;
     public boolean hideAllyClaims = false;
 
+    public boolean trackSameFaction = true;
+    public boolean trackAlly = true;
+    public boolean trackEnemy = false;
+    public boolean trackNeutral = false;
+
     public static void load() {
         try {
             if (!file.exists()) {

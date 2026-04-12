@@ -1,30 +1,45 @@
 package h3liiix.xaerofactions;
+
 import h3liiix.xaerofactions.network.ClaimResponsePayload;
 import h3liiix.xaerofactions.network.SyncClaimsPayload;
+import h3liiix.xaerofactions.network.SyncPlayerPosPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.client.MinecraftClient;
 
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class XaeroFactionsClient implements ClientModInitializer {
     public static final Map<String, SyncClaimsPayload.ClaimInfo> CACHED_CLAIMS = new ConcurrentHashMap<>();
+    public static final Map<UUID, SyncPlayerPosPayload.PlayerPosInfo> TRACKED_PLAYERS = new ConcurrentHashMap<>();
     public static int claimHash = 1;
 
     @Override
     public void onInitializeClient() {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             CACHED_CLAIMS.clear();
+            TRACKED_PLAYERS.clear();
             claimHash++; 
             forceMapReload();
         });
 
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             CACHED_CLAIMS.clear();
+            TRACKED_PLAYERS.clear();
             claimHash++; 
             forceMapReload();
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(SyncPlayerPosPayload.ID, (payload, context) -> {
+            context.client().execute(() -> {
+                TRACKED_PLAYERS.clear();
+                for (SyncPlayerPosPayload.PlayerPosInfo pos : payload.positions()) {
+                    TRACKED_PLAYERS.put(pos.uuid(), pos);
+                }
+            });
         });
 
         ClientPlayNetworking.registerGlobalReceiver(SyncClaimsPayload.ID, (payload, context) -> {

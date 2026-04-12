@@ -5,7 +5,11 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "client.HighlighterRegistryMixin",
-    "client.GuiMapContextMenuMixin"
+    "client.GuiMapContextMenuMixin",
+    "client.SupportModsMinimapMixin",
+    "client.SupportModsWorldMapMixin",
+    "client.PlayerTrackerMinimapElementRendererMixin",
+    "client.PlayerTrackerMapElementRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
